@@ -18,9 +18,9 @@ SENSITIVE_PORTS = {21, 22, 23, 3389, 445, 80, 443, 8080, 8443}
 
 def parse_args():
     p = argparse.ArgumentParser(description="L1 Balanced: fast deterministic L1 filter")
-    p.add_argument("--input", "-i", default=r"C:\\Users\\SHREYAS KUMAR\\Desktop\\projcts\\Major_Project\\Combined_CIC_Data.json")
-    p.add_argument("--output", "-o", default=r"C:\\Users\\SHREYAS KUMAR\\Downloads\\l1_output6PP.jsonl")
-    p.add_argument("--stats", default=r"C:\\Users\\SHREYAS KUMAR\\Downloads\\l1_stats6PP.txt")
+    p.add_argument("--input", "-i", default="Combined_CIC_Data.json")
+    p.add_argument("--output", "-o", default="l1_output6PP.jsonl")
+    p.add_argument("--stats", default="l1_stats6PP.txt")
     p.add_argument("--sample-every", type=int, default=10)
     # Relaxed default between previous (6) and stricter (10)
     p.add_argument("--min-score", type=int, default=8)

@@ -53,12 +53,29 @@ if __name__ == "__main__":
             l1_out,
             "--output",
             l2_out,
+            "--model",
+            "llama3.2:3b",
             "--sample-size",
             "20000",
             "--min-severity",
             "MEDIUM",
             "--target-alerts",
             "30",
+            "--verbose",
+        ], check=True)
+
+        l3_out = os.path.join(os.getcwd(), "l3_output_review.jsonl")
+        subprocess.run([
+            "/usr/local/bin/python3",
+            "L3_processor.py",
+            "--input",
+            l2_out,
+            "--output",
+            l3_out,
+            "--window-size",
+            "8",
+            "--epochs",
+            "8",
             "--verbose",
         ], check=True)
 

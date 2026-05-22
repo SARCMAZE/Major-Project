@@ -36,6 +36,10 @@ const pageMetadata = {
     title: "L2 Agent Analysis",
     description: "Local LLM-backed analysis for suspicious flows and attack classification.",
   },
+  l3: {
+    title: "L3 Final Review",
+    description: "LSTM-based sequence review that finds patterns across the L2 output and generates the final verdict.",
+  },
 };
 
 const chartPalette = ["#3dd9d6", "#a3e635", "#fb7185", "#38bdf8", "#f59e0b", "#c084fc"];
@@ -159,6 +163,7 @@ function App() {
   const datasetSummary = data?.datasetSummary;
   const trendData = useMemo(() => summarizeTrend(alerts).slice(-12), [alerts]);
   const selectedAlert = alerts[0];
+  const isL3Page = currentPage === "l3";
 
   function toggleMultiSelect(key, value) {
     setFilters((current) => {
@@ -283,12 +288,13 @@ function App() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className={`grid gap-4 md:grid-cols-2 ${isL3Page ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}>
             <MetricCard title="Total Dataset" value={datasetSummary?.totalAlerts} accent="cyan" subtitle="Complete alert population" />
             <MetricCard title="Filtered Alerts" value={summary?.totalAlerts} accent="lime" subtitle={`of ${datasetSummary?.totalAlerts ?? 0} total`} />
             <MetricCard title="High Risk" value={summary?.highRiskAlerts} accent="ember" subtitle={`of ${datasetSummary?.highRiskAlerts ?? 0} total`} />
             <MetricCard title="Avg Risk" value={formatNumber(summary?.averageRisk)} accent="cyan" subtitle="Current filtered view" />
             <MetricCard title="Avg Confidence" value={formatNumber(summary?.averageConfidence)} accent="lime" subtitle="Current filtered view" />
+            {isL3Page ? <MetricCard title="Avg Pattern Score" value={formatNumber(summary?.averagePatternScore)} accent="ember" subtitle="LSTM reconstruction signal" /> : null}
           </div>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
@@ -367,7 +373,7 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title="Priority Alert" subtitle="Top-ranked alert in the filtered set">
+            <Panel title={isL3Page ? "Final Review" : "Priority Alert"} subtitle={isL3Page ? "LSTM-based verdict for the top reviewed sequence" : "Top-ranked alert in the filtered set"}>
               {selectedAlert ? (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -385,6 +391,12 @@ function App() {
                       {selectedAlert.srcIp}:{selectedAlert.srcPort} to {selectedAlert.dstIp}:{selectedAlert.dstPort}
                     </p>
                   </div>
+                  {isL3Page ? (
+                    <div className="rounded-2xl border border-cyan/20 bg-cyan/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">L3 Final Review</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-100">{selectedAlert.finalReview ?? selectedAlert.explanation}</p>
+                    </div>
+                  ) : null}
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Explanation</p>
                     <p className="mt-2 text-sm leading-6 text-slate-200">{selectedAlert.explanation}</p>
@@ -398,6 +410,7 @@ function App() {
                     <Stat label="Confidence" value={selectedAlert.confidence} />
                     <Stat label="Flow Bytes/s" value={formatNumber(selectedAlert.flowBytesPerSec)} />
                     <Stat label="Flow Packets/s" value={formatNumber(selectedAlert.flowPacketsPerSec)} />
+                    {isL3Page ? <Stat label="Pattern Score" value={formatNumber(selectedAlert.patternScore)} /> : null}
                   </div>
                 </div>
               ) : (

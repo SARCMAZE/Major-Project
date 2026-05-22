@@ -43,6 +43,15 @@ elif preferred_l2_alt.exists():
     INPUT_FILE_L2 = preferred_l2_alt
 else:
     INPUT_FILE_L2 = find_latest_file(["l2_output*.jsonl", "l2_*.jsonl", "l2-output*.jsonl"]) or Path("l2_output3PP.jsonl")
+
+preferred_l3 = Path("l3_output_review.jsonl")
+preferred_l3_alt = Path("l3_output_review.JSONL")
+if preferred_l3.exists():
+    INPUT_FILE_L3 = preferred_l3
+elif preferred_l3_alt.exists():
+    INPUT_FILE_L3 = preferred_l3_alt
+else:
+    INPUT_FILE_L3 = find_latest_file(["l3_output*.jsonl", "l3_*.jsonl", "l3-output*.jsonl"]) or Path("l3_output_review.jsonl")
 SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 PROTOCOL_MAP = {1: "ICMP", 6: "TCP", 17: "UDP"}
 
@@ -125,6 +134,20 @@ def normalize_record(log, source="l2"):
                 "recommendation": l2.get("recommendation") or "No recommendation provided.",
             }
         )
+    elif source == "l3":
+        l3 = parse_l2_analysis(log.get("l3_analysis"))
+        record.update(
+            {
+                "riskScore": to_number(l3.get("risk_score")),
+                "confidence": to_number(l3.get("confidence_score")),
+                "patternScore": to_number(l3.get("pattern_score")),
+                "attackType": l3.get("final_review") or l3.get("attack_type") or "Unknown",
+                "finalReview": l3.get("final_review") or "No final review provided.",
+                "explanation": l3.get("explanation") or "No explanation provided.",
+                "recommendation": l3.get("recommendation") or "No recommendation provided.",
+                "sourceAttackType": l3.get("source_attack_type") or "Unknown",
+            }
+        )
     else:
         label = str(pick(log, "label", default="L1 Review")).strip()
         if not label or label.upper() == "BENIGN":
@@ -169,7 +192,12 @@ def risk_band(score):
 
 
 def load_alerts(source="l2"):
-    input_file = INPUT_FILE_L1 if source == "l1" else INPUT_FILE_L2
+    if source == "l1":
+        input_file = INPUT_FILE_L1
+    elif source == "l3":
+        input_file = INPUT_FILE_L3
+    else:
+        input_file = INPUT_FILE_L2
     if not input_file.exists():
         return []
 
@@ -203,6 +231,8 @@ def build_summary(alerts):
     avg_confidence = (
         round(sum((alert["confidence"] or 0) for alert in alerts) / total_alerts, 2) if total_alerts else None
     )
+    pattern_scores = [alert["patternScore"] for alert in alerts if alert.get("patternScore") is not None]
+    avg_pattern_score = round(sum(pattern_scores) / len(pattern_scores), 2) if pattern_scores else None
     timestamps = [alert["timestamp"] for alert in alerts if alert["timestamp"]]
 
     return {
@@ -211,6 +241,7 @@ def build_summary(alerts):
         "criticalSeverityAlerts": len(critical),
         "averageRisk": avg_risk,
         "averageConfidence": avg_confidence,
+        "averagePatternScore": avg_pattern_score,
         "latestEvent": max(timestamps) if timestamps else None,
         "severityBreakdown": count_by(alerts, "severity", SEVERITY_ORDER),
         "attackTypeBreakdown": top_counts(alerts, "attackType", 10),
@@ -304,6 +335,9 @@ class AlertAPIHandler(BaseHTTPRequestHandler):
         elif parsed.path in ("/api/l2", "/api/alerts"):
             alerts = load_alerts("l2")
             source_name = "L2"
+        elif parsed.path == "/api/l3":
+            alerts = load_alerts("l3")
+            source_name = "L3"
         else:
             return self.respond_json({"error": "Not found"}, status=404)
 
@@ -349,6 +383,7 @@ def main():
     print(f"API server running at http://{HOST}:{PORT}")
     print(f"Using L1 input file: {INPUT_FILE_L1} (exists={INPUT_FILE_L1.exists()})")
     print(f"Using L2 input file: {INPUT_FILE_L2} (exists={INPUT_FILE_L2.exists()})")
+    print(f"Using L3 input file: {INPUT_FILE_L3} (exists={INPUT_FILE_L3.exists()})")
     server.serve_forever()
 
 
