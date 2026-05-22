@@ -169,14 +169,86 @@ def generate_heuristic_l2_analysis(source: str, log: dict, score: int) -> tuple[
     return attack_type, explanation, recommendation
 
 
+# Local Ollama L2 Analysis Support
+def generate_ollama_l2_analysis(source: str, log: dict, score: int) -> tuple[str, str, str] | None:
+    """
+    Attempts to call local Ollama model to get intelligent security summaries.
+    Returns None if server is offline, returns raw heuristic fallback on failure.
+    """
+    url = f"{config.OLLAMA_HOST}/api/chat"
+    headers = {"Content-Type": "application/json"}
+    
+    prompt = f"""
+    You are an expert L2 Security Operations Center (SOC) Analyst.
+    Analyze this raw suspicious security log and provide a professional, structured incident report.
+    
+    LOG SOURCE: {source}
+    L1 SUSPICION SCORE: {score}
+    RAW LOG ENTRY:
+    {json.dumps(log, indent=2)}
+    
+    Format your response EXACTLY as a JSON object with these 3 keys:
+    1. "attack_type": a concise 2-4 word categorization (e.g. "SQL Injection Attack", "SSH Brute Force")
+    2. "explanation": a detailed, highly technical paragraph explaining exactly what the attacker is doing based on the log fields and why it is a risk.
+    3. "recommendation": a concise bulleted list of 2-3 specific, actionable mitigation steps the client should take immediately to isolate the threat and patch the vulnerability.
+
+    Return ONLY the raw JSON block without markdown wrappers like ```json or ```.
+    """
+
+    payload = {
+        "model": config.OLLAMA_MODEL,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "stream": False,
+        "options": {
+            "temperature": 0.0
+        }
+    }
+
+    try:
+        logger.info(f"Attempting local L2 analysis via Ollama model '{config.OLLAMA_MODEL}' at {config.OLLAMA_HOST}...")
+        response = requests.post(url, json=payload, headers=headers, timeout=5.0)
+        if response.status_code == 200:
+            res_data = response.json()
+            text_content = res_data.get("message", {}).get("content", "").strip()
+            
+            # Clean markdown blocks if LLM still returned them
+            if text_content.startswith("```"):
+                lines = text_content.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                text_content = "\n".join(lines).strip()
+            
+            parsed = json.loads(text_content)
+            attack_type = parsed.get("attack_type", "Suspicious Log Activity")
+            explanation = parsed.get("explanation", f"Local analyst review of {source} telemetry.")
+            recommendation = parsed.get("recommendation", "Review active threat profile.")
+            
+            if isinstance(recommendation, list):
+                recommendation = "\n".join(f"- {item}" for item in recommendation)
+                
+            return attack_type, explanation, recommendation
+    except Exception as e:
+        logger.warning(f"Ollama local model failed or was offline: {e}")
+        
+    return None
+
+
 # GenAI Gemini Integration
 def generate_genai_l2_analysis(source: str, log: dict, score: int) -> tuple[str, str, str]:
     """
     Attempts to call Gemini API to get intelligent security summaries.
-    Falls back to rules if API fails or is not configured.
+    Falls back to local Ollama model if Gemini is unconfigured or offline.
+    Falls back to heuristic rules if both are offline.
     """
-    # 1. Fallback if no key is configured
+    # 1. Fallback to Ollama first if no Gemini key is configured
     if not config.GEMINI_API_KEY:
+        ollama_res = generate_ollama_l2_analysis(source, log, score)
+        if ollama_res:
+            return ollama_res
         return generate_heuristic_l2_analysis(source, log, score)
 
     # 2. Call Gemini
@@ -214,7 +286,6 @@ def generate_genai_l2_analysis(source: str, log: dict, score: int) -> tuple[str,
         response = requests.post(url, json=payload, headers=headers, timeout=5.0)
         if response.status_code == 200:
             res_data = response.json()
-            # Extract text
             candidates = res_data.get("candidates", [])
             if candidates:
                 text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
@@ -231,12 +302,23 @@ def generate_genai_l2_analysis(source: str, log: dict, score: int) -> tuple[str,
                 attack_type = parsed.get("attack_type", "Suspicious Log Activity")
                 explanation = parsed.get("explanation", f"Analyst review of {source} telemetry.")
                 recommendation = parsed.get("recommendation", "Review active threat profile.")
+                
+                if isinstance(recommendation, list):
+                    recommendation = "\n".join(f"- {item}" for item in recommendation)
+                    
                 return attack_type, explanation, recommendation
         else:
-            logger.warning(f"Gemini API returned status code {response.status_code}. Using deterministic SOC rule fallback.")
+            logger.warning(f"Gemini API returned status code {response.status_code}. Checking local Ollama model fallback...")
+            ollama_res = generate_ollama_l2_analysis(source, log, score)
+            if ollama_res:
+                return ollama_res
     except Exception as e:
-        logger.error(f"Failed to communicate with Gemini API: {e}. Using deterministic SOC rule fallback.")
+        logger.error(f"Failed to communicate with Gemini API: {e}. Checking local Ollama model fallback...")
+        ollama_res = generate_ollama_l2_analysis(source, log, score)
+        if ollama_res:
+            return ollama_res
 
+    # Default fallback to heuristic rules
     return generate_heuristic_l2_analysis(source, log, score)
 
 

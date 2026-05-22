@@ -101,6 +101,26 @@ def shutdown_event():
 # REST API ENDPOINTS
 # ====================================================
 
+@app.get("/")
+def read_root():
+    """
+    Root endpoint serving system overview and API endpoints metadata.
+    """
+    return {
+        "title": "Aegis-X Real-Time Multi-Agent SOC Platform API",
+        "version": "2.0.0",
+        "description": "Continuous cyber threat simulation, L1/L2 multi-agent triage, ML Isolation Forest anomaly detection, and IP correlation telemetry pipeline.",
+        "documentation": "/docs",
+        "endpoints": {
+            "health": "/api/health",
+            "alerts": "/api/alerts",
+            "metrics": "/api/metrics",
+            "ip_states": "/api/ip-states",
+            "emulator_control": "/api/emulator/control"
+        }
+    }
+
+
 @app.get("/api/health")
 def health_check():
     return {

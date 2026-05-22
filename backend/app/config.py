@@ -35,6 +35,7 @@ EMULATOR_MAX_INTERVAL = float(os.getenv("EMULATOR_MAX_INTERVAL", "2.0"))
 # GenAI Security configurations
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
 # If GEMINI_API_KEY is not in env, try reading from .env.local
 if not GEMINI_API_KEY:
