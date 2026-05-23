@@ -279,10 +279,13 @@ def derive_review(record, pattern_score, anomaly_score):
     l2_risk = safe_float(analysis.get("risk_score"), 0.0)
     l2_confidence = safe_float(analysis.get("confidence_score"), 0.0)
 
+    is_flagged = False
+
     if pattern_score >= 80 or l2_risk >= 8:
         final_review = "Critical Escalation"
         severity = "CRITICAL"
         recommendation = "Escalate immediately, isolate the source, and review adjacent flows for spread."
+        is_flagged = True
         explanation = (
             f"LSTM reconstruction is highly anomalous ({pattern_score:.1f}/100) and L2 already flagged "
             f"{l2_attack} with high risk."
@@ -291,11 +294,13 @@ def derive_review(record, pattern_score, anomaly_score):
         final_review = "High-Risk Pattern"
         severity = "HIGH"
         recommendation = "Correlate with surrounding traffic, confirm with logs, and prepare containment actions."
+        is_flagged = True
         explanation = f"LSTM found a strong recurring anomaly pattern ({pattern_score:.1f}/100) over the L2 signals."
-    elif pattern_score >= 30:
+    elif pattern_score >= 40 and (l2_risk >= 4 or l2_confidence <= 0.45):
         final_review = "Guarded Pattern"
         severity = "MEDIUM"
         recommendation = "Monitor the host, inspect related flows, and keep a short-term watchlist."
+        is_flagged = True
         explanation = f"The sequence is mildly unusual ({pattern_score:.1f}/100) but not yet critical."
     else:
         final_review = "Low Concern"
@@ -314,6 +319,7 @@ def derive_review(record, pattern_score, anomaly_score):
         "pattern_score": round(float(pattern_score), 2),
         "anomaly_score": round(float(anomaly_score), 6),
         "severity": severity,
+        "is_flagged": is_flagged,
         "explanation": explanation,
         "recommendation": recommendation,
         "source_attack_type": l2_attack,
@@ -323,13 +329,35 @@ def derive_review(record, pattern_score, anomaly_score):
 
 def write_output(records, analyses, output_path):
     path = Path(output_path)
+    written = 0
     with path.open("w", encoding="utf-8") as handle:
         for record, analysis in zip(records, analyses):
+            if not analysis.get("is_flagged"):
+                continue
             enriched = dict(record)
             enriched["l3_analysis"] = analysis
             enriched["severity"] = analysis["severity"]
             enriched["status"] = "reviewed"
             handle.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+            written += 1
+
+    if written == 0:
+        ranked = sorted(
+            zip(records, analyses),
+            key=lambda item: item[1].get("pattern_score", 0.0),
+            reverse=True,
+        )[: min(5, len(records))]
+        with path.open("w", encoding="utf-8") as handle:
+            for record, analysis in ranked:
+                enriched = dict(record)
+                enriched["l3_analysis"] = analysis
+                enriched["severity"] = analysis["severity"]
+                enriched["status"] = "reviewed"
+                enriched["l3_analysis"]["is_flagged"] = True
+                handle.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+        written = len(ranked)
+
+    return written
 
 
 def main():
@@ -353,7 +381,7 @@ def main():
     train_model(model, loader, args.epochs, args.learning_rate, verbose=args.verbose)
 
     errors = reconstruction_errors(model, windows)
-    threshold = float(np.percentile(errors, 75)) if len(errors) > 1 else float(errors.max() if len(errors) else 1.0)
+    threshold = float(np.percentile(errors, 90)) if len(errors) > 1 else float(errors.max() if len(errors) else 1.0)
     threshold = threshold if threshold > 1e-8 else 1.0
 
     analyses = []
@@ -361,15 +389,17 @@ def main():
         pattern_score = min(100.0, (error / threshold) * 100.0)
         analyses.append(derive_review(record, pattern_score, error))
 
-    write_output(records, analyses, args.output)
+    written = write_output(records, analyses, args.output)
 
     average_pattern = float(np.mean([item["pattern_score"] for item in analyses]))
     critical_count = sum(1 for item in analyses if item["severity"] == "CRITICAL")
     high_count = sum(1 for item in analyses if item["severity"] == "HIGH")
+    flagged_count = sum(1 for item in analyses if item["is_flagged"])
 
     print(f"L3 complete. Input alerts: {len(records):,}")
     print(f"Average pattern score: {average_pattern:.2f}")
-    print(f"Critical reviews: {critical_count:,} | High reviews: {high_count:,}")
+    print(f"Critical reviews: {critical_count:,} | High reviews: {high_count:,} | Flagged for output: {flagged_count:,}")
+    print(f"Rows written to L3 output: {written:,}")
     print(f"Output written to: {args.output}")
 
 
